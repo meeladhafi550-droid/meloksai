@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Melok AI</title>
+<style>
+  * { box-sizing: border-box; }
+  body { margin: 0; font-family: system-ui, sans-serif; background: #1e1e24; color: #eee; display: flex; flex-direction: column; height: 100vh; }
+  header { padding: 14px 20px; background: #2b2b33; font-size: 18px; font-weight: 600; display: flex; justify-content: space-between; align-items: center; }
+  #status { font-size: 13px; font-weight: 400; color: #aab; }
+  #balken { height: 4px; background: #2b2b33; }
+  #fortschritt { height: 100%; width: 0%; background: #3b6ef5; transition: width 0.3s; }
+  #chat { flex: 1; overflow-y: auto; padding: 20px; display: flex; flex-direction: column; gap: 12px; }
+  .msg { max-width: 75%; padding: 10px 14px; border-radius: 14px; white-space: pre-wrap; line-height: 1.45; }
+  .user { align-self: flex-end; background: #3b6ef5; }
+  .ki { align-self: flex-start; background: #34343d; }
+  form { display: flex; gap: 10px; padding: 14px; background: #2b2b33; }
+  input { flex: 1; padding: 12px; border-radius: 10px; border: none; font-size: 16px; background: #3a3a44; color: #eee; }
+  button { padding: 12px 20px; border: none; border-radius: 10px; background: #3b6ef5; color: white; font-size: 16px; cursor: pointer; }
+  button:disabled { opacity: 0.5; cursor: wait; }
+</style>
+</head>
+<body>
+<header>
+  <span>Melok AI</span>
+  <span id="status">Modell wird geladen...</span>
+</header>
+<div id="balken"><div id="fortschritt"></div></div>
+<div id="chat"></div>
+<form id="form">
+  <input id="eingabe" placeholder="Schreib etwas..." autocomplete="off" autofocus>
+  <button id="senden" type="submit" disabled>Senden</button>
+</form>
+
+<script type="module">
+  import * as webllm from "https://esm.run/@mlc-ai/web-llm";
+
+  // Kleines Modell, das im Browser läuft (ca. 1 GB, einmaliger Download)
+  const MODELL = "Qwen2.5-1.5B-Instruct-q4f32_1-MLC";
+  // Hier kannst du der KI eine Persönlichkeit geben
+  const SYSTEM = "Du bist Melok AI, mein persönlicher, freundlicher Assistent. Antworte auf Deutsch, kurz und verständlich.";
+
+  const chat = document.getElementById("chat");
+  const form = document.getElementById("form");
+  const eingabe = document.getElementById("eingabe");
+  const senden = document.getElementById("senden");
+  const status = document.getElementById("status");
+  const fortschritt = document.getElementById("fortschritt");
+  const verlauf = [{ role: "system", content: SYSTEM }];
+
+  function nachricht(text, klasse) {
+    const d = document.createElement("div");
+    d.className = "msg " + klasse;
+    d.textContent = text;
+    chat.appendChild(d);
+    chat.scrollTop = chat.scrollHeight;
+    return d;
+  }
+
+  let engine;
+  try {
+    engine = await webllm.CreateMLCEngine(MODELL, {
+      initProgressCallback: (info) => {
+        status.textContent = info.text;
+        fortschritt.style.width = Math.round((info.progress || 0) * 100) + "%";
+      }
+    });
+    status.textContent = "Bereit";
+    senden.disabled = false;
+  } catch (fehler) {
+    status.textContent = "Fehler beim Laden";
+    nachricht("Das Modell konnte nicht geladen werden. Nutze Chrome oder Edge am Computer, WebLLM braucht WebGPU. Fehler: " + fehler.message, "ki");
+  }
+
+  form.addEventListener("submit", async (e) => {
+    e.preventDefault();
+    const text = eingabe.value.trim();
+    if (!text || !engine) return;
+    eingabe.value = "";
+    senden.disabled = true;
+    nachricht(text, "user");
+    verlauf.push({ role: "user", content: text });
+    const antwortFeld = nachricht("...", "ki");
+
+    try {
+      const strom = await engine.chat.completions.create({
+        messages: verlauf,
+        stream: true
+      });
+      let antwort = "";
+      antwortFeld.textContent = "";
+      for await (const teil of strom) {
+        const inhalt = teil.choices[0]?.delta?.content || "";
+        antwort += inhalt;
+        antwortFeld.textContent = antwort;
+        chat.scrollTop = chat.scrollHeight;
+      }
+      verlauf.push({ role: "assistant", content: antwort });
+    } catch (fehler) {
+      antwortFeld.textContent = "Fehler: " + fehler.message;
+    }
+    senden.disabled = false;
+    eingabe.focus();
+  });
+</script>
+</body>
+</html>
